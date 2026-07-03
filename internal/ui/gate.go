@@ -199,18 +199,17 @@ func GateVia(results []scan.Result, in io.Reader, out io.Writer, strict bool) bo
 		DrainInput(tty) // discard keystrokes buffered before this prompt
 		fmt.Fprint(out, p)
 		line, _ := br.ReadString('\n')
-		return strings.TrimSpace(strings.ToLower(line))
+		return strings.TrimSpace(line)
 	}
+	prompt := White("  Type INSTALL to override the scanner, or [q]uit to exit: ")
 	for {
-		switch ask("  [A]bort (default) / [c]ontinue anyway: ") {
-		case "", "a":
+		switch resp := ask(prompt); {
+		case strings.EqualFold(resp, "INSTALL"):
+			return true
+		case strings.EqualFold(resp, "q"), strings.EqualFold(resp, "quit"):
 			return false
-		case "c":
-			DrainInput(tty)
-			fmt.Fprint(out, "  Type the word INSTALL to override the scanner: ")
-			confirm, _ := br.ReadString('\n')
-			return strings.TrimSpace(confirm) == "INSTALL"
 		}
+		prompt = Red("  (mis-spelled) type INSTALL to override, or [q]uit to exit: ")
 	}
 }
 
