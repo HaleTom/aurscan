@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lib${pkgname}.so`) is deliberately *not* flagged.
 
 ### Fixed
+- **Usage line no longer shows `cost n/a` for priced OpenAI-compatible and Codex
+  models (#52).** `callOpenAI` now prices its usage exactly like the Anthropic
+  API path, so routed cloud models (LiteLLM & co.) with real token counts show a
+  real cost. The built-in price table gained `gpt-5.x` / `gpt-5` / `gpt-4.x` /
+  `o3` / `o4-mini` prefixes and matches proxy-qualified ids (`openai/gpt-4o`).
+  The Codex CLI, which exposes neither tokens nor cost, now shows an *estimated*
+  API-equivalent cost when the model is known (`AURSCAN_CODEX_MODEL` or the
+  `AURSCAN_PRICE_IN`/`_OUT` override); a cost derived from estimated tokens is
+  rendered `~$…`, keeping the `~tokens` / cost pair internally consistent.
 - **`PRIV-001` no longer false-positives on echo'd instructions (#43).** A `sudo`
   printed inside an `echo` string (post-install guidance in a `.install` hook) is
   data, not a command, and is no longer flagged — the regex could not tell a

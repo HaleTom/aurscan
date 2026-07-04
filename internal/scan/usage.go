@@ -33,7 +33,10 @@ func (u Usage) String() string {
 	}
 	cost := "cost n/a"
 	if u.HaveCost {
-		cost = fmt.Sprintf("$%.4f", u.CostUSD)
+		// An estimated cost (computed from estimated token counts) carries
+		// the same "~" marker as the token counts, so the line stays
+		// internally consistent (issue #52).
+		cost = fmt.Sprintf("%s$%.4f", approx, u.CostUSD)
 	}
 	return fmt.Sprintf("tokens: %s%s in / %s%s out · %s",
 		approx, thousands(u.In), approx, thousands(u.Out), cost)
@@ -47,17 +50,39 @@ func thousands(n int) string {
 	return s
 }
 
+// priceUsage fills CostUSD/HaveCost on u when a per-token price is known for
+// model (built-in table or AURSCAN_PRICE_IN/OUT override). When the token
+// counts are estimated the resulting cost is an estimate too, which
+// Usage.String renders as "~$…" (issue #52). Unknown models pass through
+// unchanged and keep rendering "cost n/a".
+func priceUsage(u Usage, model string) Usage {
+	if pin, pout, ok := ModelPrice(model); ok {
+		u.CostUSD = float64(u.In)/1e6*pin + float64(u.Out)/1e6*pout
+		u.HaveCost = true
+	}
+	return u
+}
+
 // ModelPrice returns USD-per-million-token rates for a model id (prefix match).
 // Override with AURSCAN_PRICE_IN / AURSCAN_PRICE_OUT. Rates are checked at
 // release time against https://platform.claude.com/docs/en/about-claude/pricing
-// and may drift; the env override exists precisely so you never depend on a
-// stale built-in table.
+// and https://developers.openai.com/api/docs/pricing and may drift; the env
+// override exists precisely so you never depend on a stale built-in table.
 func ModelPrice(model string) (in, out float64, ok bool) {
 	if pi, po := os.Getenv("AURSCAN_PRICE_IN"), os.Getenv("AURSCAN_PRICE_OUT"); pi != "" && po != "" {
 		fmt.Sscanf(pi, "%f", &in)
 		fmt.Sscanf(po, "%f", &out)
 		return in, out, true
 	}
+	// Routing proxies (LiteLLM, OpenRouter, …) often qualify the id, e.g.
+	// "openai/gpt-4o"; match on the bare model id.
+	if i := strings.LastIndexByte(model, '/'); i >= 0 {
+		model = model[i+1:]
+	}
+	model = strings.ToLower(model)
+	// Entries are matched top-down, so a more specific prefix must precede
+	// its shorter parent ("gpt-5-mini" before "gpt-5", "gpt-5.4-nano"
+	// before "gpt-5.4", …).
 	table := []struct {
 		prefix  string
 		in, out float64
@@ -65,6 +90,27 @@ func ModelPrice(model string) (in, out float64, ok bool) {
 		{"claude-opus", 5, 25},
 		{"claude-sonnet", 3, 15},
 		{"claude-haiku", 1, 5},
+		// OpenAI — current lineup.
+		{"gpt-5.5", 5, 30},
+		{"gpt-5.4-mini", 0.75, 4.50},
+		{"gpt-5.4-nano", 0.20, 1.25},
+		{"gpt-5.4", 2.50, 15},
+		// OpenAI — older snapshots still reachable via the API and the
+		// Codex CLI (codex variants were priced like their base model).
+		{"gpt-5.2", 1.75, 14},
+		{"gpt-5.1-codex-mini", 0.25, 2},
+		{"gpt-5.1", 1.25, 10}, // also covers gpt-5.1-codex
+		{"gpt-5-mini", 0.25, 2},
+		{"gpt-5-nano", 0.05, 0.40},
+		{"gpt-5", 1.25, 10}, // also covers gpt-5-codex; keep last of gpt-5*
+		{"gpt-4.1-mini", 0.40, 1.60},
+		{"gpt-4.1-nano", 0.10, 0.40},
+		{"gpt-4.1", 2, 8},
+		{"gpt-4o-mini", 0.15, 0.60},
+		{"gpt-4o", 2.50, 10},
+		{"o4-mini", 1.10, 4.40},
+		{"o3-mini", 1.10, 4.40},
+		{"o3", 2, 8},
 	}
 	for _, p := range table {
 		if strings.HasPrefix(model, p.prefix) {

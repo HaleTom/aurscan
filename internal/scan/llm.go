@@ -394,7 +394,8 @@ func callCodexCLI(ctx context.Context, be Backend, instructions, content string,
 		"--sandbox", "read-only",
 		"--color", "never",
 	}
-	if model := nz(be.Model, os.Getenv("AURSCAN_CODEX_MODEL")); model != "" {
+	model := nz(be.Model, os.Getenv("AURSCAN_CODEX_MODEL"))
+	if model != "" {
 		args = append(args, "--model", model)
 	}
 	args = append(args, instructions)
@@ -406,8 +407,13 @@ func callCodexCLI(ctx context.Context, be Backend, instructions, content string,
 	if err := c.Run(); err != nil {
 		return "", Usage{}, fmt.Errorf("codex CLI failed: %s", firstN(errb.String(), 300))
 	}
+	// The Codex CLI exposes neither token counts nor cost on stdout, so both
+	// are estimates. When the model is known (per-backend model= or
+	// AURSCAN_CODEX_MODEL) — or AURSCAN_PRICE_IN/OUT is set — an estimated
+	// API-equivalent cost is shown as "~$…"; otherwise "cost n/a" (issue #52).
 	text := out.String()
-	return text, Usage{In: estIn, Out: estimateTokens(text), Estimated: true}, nil
+	u := priceUsage(Usage{In: estIn, Out: estimateTokens(text), Estimated: true}, model)
+	return text, u, nil
 }
 
 func callAPI(ctx context.Context, be Backend, instructions, content string) (string, Usage, error) {
@@ -455,11 +461,7 @@ func callAPI(ctx context.Context, be Backend, instructions, content string) (str
 	for _, b := range out.Content {
 		sb.WriteString(b.Text)
 	}
-	u := Usage{In: out.Usage.In, Out: out.Usage.Out}
-	if pin, pout, ok := ModelPrice(model); ok {
-		u.CostUSD = float64(u.In)/1e6*pin + float64(u.Out)/1e6*pout
-		u.HaveCost = true
-	}
+	u := priceUsage(Usage{In: out.Usage.In, Out: out.Usage.Out}, model)
 	return sb.String(), u, nil
 }
 
@@ -501,7 +503,10 @@ func resolveMaxTokens(be Backend) int {
 // AURSCAN_OPENAI_URL_FALLBACK second, so a primary GPU host can fall back to a
 // local CPU instance — generalising the community connector from issue #1.
 // Each URL gets its own full timeout budget. Tokens are taken from the server's
-// usage block when present, else estimated; cost is n/a for local models.
+// usage block when present, else estimated. Cost is computed via ModelPrice
+// when the model is priced (routed cloud models, or AURSCAN_PRICE_IN/OUT for
+// anything else, e.g. amortised local hardware); otherwise it stays n/a
+// (issue #52).
 func callOpenAI(parent context.Context, to time.Duration, be Backend, instructions, content string, estIn int) (string, Usage, error) {
 	// A spec URL fully overrides the environment; the env primary/fallback pair
 	// is used only when the spec leaves URL empty (the env-derived backend).
@@ -533,7 +538,8 @@ func callOpenAI(parent context.Context, to time.Duration, be Backend, instructio
 			{"role": "user", "content": content},
 		},
 	}
-	if model := nz(be.Model, os.Getenv("AURSCAN_OPENAI_MODEL")); model != "" {
+	model := nz(be.Model, os.Getenv("AURSCAN_OPENAI_MODEL"))
+	if model != "" {
 		payload["model"] = model
 	}
 	body, _ := json.Marshal(payload)
@@ -596,7 +602,12 @@ func callOpenAI(parent context.Context, to time.Duration, be Backend, instructio
 			if usage.In == 0 && usage.Out == 0 {
 				usage = Usage{In: estIn, Out: estimateTokens(text), Estimated: true}
 			}
-			return text, usage, nil
+			// Mirror callAPI: price the usage when the model is known
+			// (routed cloud models) or AURSCAN_PRICE_IN/OUT is set. Local
+			// models with no price keep "cost n/a" (issue #52). When a
+			// proxy picked the model itself (no model sent), only the env
+			// override can price it.
+			return text, priceUsage(usage, model), nil
 		}()
 		if err != nil {
 			lastErr = err

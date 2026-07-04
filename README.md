@@ -361,11 +361,14 @@ scanner usage: 1 call(s) · tokens: 12,431 in / 214 out · $0.0413
 | Backend | Tokens | Cost |
 |---|---|---|
 | Claude Code CLI | exact | exact (`total_cost_usd`) |
-| Codex CLI | estimated (`~`) | `cost n/a` |
+| Codex CLI | estimated (`~`) | estimated (`~$`) when the model is priced, else `cost n/a` |
 | API key | exact | computed from price table |
-| Custom command | estimated (`~`) | `cost n/a` |
+| OpenAI-compatible | exact when the server reports usage, else estimated (`~`) | computed from price table when the model is priced (routed cloud models), else `cost n/a` |
+| Custom command | estimated (`~`) | `cost n/a` (or set the price override) |
 
-Override the API price table (USD per million tokens) so you never depend on a stale built-in: `AURSCAN_PRICE_IN` / `AURSCAN_PRICE_OUT`.
+The price table covers `claude-*`, `gpt-*` and `o*` model prefixes. A cost derived from *estimated* token counts carries the same `~` marker as the counts. The Codex CLI does not expose token or cost data, so its cost is an estimated API-equivalent — shown only when the model is known (`AURSCAN_CODEX_MODEL`); subscription usage has no marginal cost, so treat it as an upper bound.
+
+Override the price table (USD per million tokens) for any backend — including local models where you want to account amortised hardware cost — so you never depend on a stale built-in: `AURSCAN_PRICE_IN` / `AURSCAN_PRICE_OUT`.
 
 ## Customising detection
 
