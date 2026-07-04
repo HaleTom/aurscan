@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-04
+
+### Added
+- **`BLD-001` / `BLD-002` — build-cache confinement (#55).** A PKGBUILD that
+  runs a cache-writing `go` subcommand (build/install/get/mod/…) without
+  confining `GOPATH`/`GOMODCACHE` — or `cargo` (build/fetch/install/…) without
+  `CARGO_HOME` — writes outside `$srcdir` into the invoking user's `$HOME`
+  (`~/go/pkg/mod`, `~/.cargo`). Reported as **info**: failure by omission, not
+  malice, but the user deserves to know before makepkg runs. Suppressed by a
+  live export or inline prefix assignment anywhere in the file (functions share
+  the makepkg process) and, for Go, by vendored builds (`-mod=vendor`). Runs on
+  the deobfuscated command view, so echo'd text does not false-positive;
+  non-writing subcommands (`go version`, `go env`, `cargo --version`) do not
+  fire.
+
+### Fixed
+- **Usage line no longer shows `cost n/a` for priced OpenAI-compatible and Codex
+  models (#52).** `callOpenAI` now prices its usage exactly like the Anthropic
+  API path, so routed cloud models (LiteLLM & co.) with real token counts show a
+  real cost. The built-in price table gained `gpt-5.x` / `gpt-5` / `gpt-4.x` /
+  `o3` / `o4-mini` prefixes and matches proxy-qualified ids (`openai/gpt-4o`).
+  The Codex CLI, which exposes neither tokens nor cost, now shows an *estimated*
+  API-equivalent cost when the model is known (`AURSCAN_CODEX_MODEL` or the
+  `AURSCAN_PRICE_IN`/`_OUT` override); a cost derived from estimated tokens is
+  rendered `~$…`, keeping the `~tokens` / cost pair internally consistent.
+
+## [0.7.0] - 2026-07-03
+
 ### Added
 - **Shell-aware rules defeat split-token obfuscation (#43).** The command, flag
   and path rules now run against a *deobfuscated* view of each `PKGBUILD` /
@@ -23,22 +51,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/etc/su""doers`), ANSI-C encoding (`su$'\x64'o`), and `${IFS…}` separator
   injection. Ordinary interpolation (`$pkgname-$pkgver`, `--prefix="/usr"`,
   `lib${pkgname}.so`) is deliberately *not* flagged.
+- **Terminal-width-aware text wrapping (#50).** Findings, verdicts, the report
+  block and the usage line now wrap to the terminal width instead of running off
+  the edge, with per-caller indent preserved (numbered report items stay aligned)
+  and named indent/width constants (`IndentBody`, `IndentBlock`, …) replacing the
+  previous magic offsets. A too-wide prefix in a narrow terminal degrades to a
+  20-column minimum rather than overflowing. (PR by HaleTom)
+- **Pointer to LLamification.** The README links [magillos/LLamification](https://github.com/magillos/LLamification)
+  as a GUI front-end option for managing the LLM configuration.
 
 ### Fixed
-- **Usage line no longer shows `cost n/a` for priced OpenAI-compatible and Codex
-  models (#52).** `callOpenAI` now prices its usage exactly like the Anthropic
-  API path, so routed cloud models (LiteLLM & co.) with real token counts show a
-  real cost. The built-in price table gained `gpt-5.x` / `gpt-5` / `gpt-4.x` /
-  `o3` / `o4-mini` prefixes and matches proxy-qualified ids (`openai/gpt-4o`).
-  The Codex CLI, which exposes neither tokens nor cost, now shows an *estimated*
-  API-equivalent cost when the model is known (`AURSCAN_CODEX_MODEL` or the
-  `AURSCAN_PRICE_IN`/`_OUT` override); a cost derived from estimated tokens is
-  rendered `~$…`, keeping the `~tokens` / cost pair internally consistent.
+- **Streamlined INSTALL override prompt on the paru path (#51).** The `GateVia`
+  hook (paru `PreBuildCommand`) no longer needs a `c`+Enter step before `INSTALL`;
+  the prompt goes straight to `INSTALL`, rendered in bright white for visibility.
+  `INSTALL` is matched case-insensitively; only `q`/`quit` exits, while empty
+  input and misspellings re-prompt rather than aborting, so a typo never discards
+  the already-reviewed verdicts and session usage. The direct `aurscan`/`yay`
+  `Gate` path (with the `[r]eport` menu) is unchanged. (PR by HaleTom)
 - **`PRIV-001` no longer false-positives on echo'd instructions (#43).** A `sudo`
   printed inside an `echo` string (post-install guidance in a `.install` hook) is
   data, not a command, and is no longer flagged — the regex could not tell a
   command position from quoted text, the shell parser can. Reported on
   `un-lock-git`.
+- **Verdict-badge and colour regressions in the UI refresh.** Info-severity
+  badges use bright white, colored severity badges render in every output path
+  (`Gate`, `GateVia`, stderr), `printVerdict` indent dropped from 9 to 2 spaces,
+  the 7-char padded badges (`  OK  ` / ` SUSP ` / ` MAL! `) are restored, and
+  `Bold(ReportTo)` — briefly lost during the wrapping rewrite — is back.
 
 ### Changed
 - **First vendored dependency: `mvdan.cc/sh/v3` (#43).** The shell parser (its
@@ -340,7 +379,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile, installer with update/uninstall, AUR `PKGBUILD`, and CI that
   attaches UPX-packed release artifacts on tags.
 
-[Unreleased]: https://github.com/manticore-projects/aurscan/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/manticore-projects/aurscan/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/manticore-projects/aurscan/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/manticore-projects/aurscan/compare/v0.6.4...v0.7.0
 [0.2.2]: https://github.com/manticore-projects/aurscan/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/manticore-projects/aurscan/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/manticore-projects/aurscan/compare/v0.1.0...v0.2.0
