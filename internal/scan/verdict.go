@@ -24,12 +24,17 @@ type Finding struct {
 	Why      string `json:"why"`
 }
 
-// Verdict is the auditor's structured result for one package.
+// Verdict is the auditor's structured result for one package. With the Tier-2
+// checklist (discussion #56) the model supplies Checks; Verdict, Confidence,
+// Summary and Findings are then DERIVED deterministically in Go (see
+// deriveVerdict). Legacy models that emit Verdict/Findings directly are still
+// accepted. Checks is retained on the result for transparency/debugging.
 type Verdict struct {
 	Verdict    string    `json:"verdict"` // OK | SUSPICIOUS | MALICIOUS
 	Confidence float64   `json:"confidence"`
 	Summary    string    `json:"summary"`
 	Findings   []Finding `json:"findings"`
+	Checks     []Check   `json:"checks,omitempty"`
 }
 
 // Rank orders verdicts so callers can compute the worst across packages.
@@ -190,11 +195,20 @@ func buildPrompt(pkg string, files Files, sig Signals) string {
 var jsonBlobRe = regexp.MustCompile(`(?s)\{.*\}`)
 
 // parseVerdictResult extracts the verdict and reports whether it is GENUINE: a
-// real JSON object that yielded a known OK/SUSPICIOUS/MALICIOUS string. The bool
-// is independent of Confidence or Summary text. The three non-genuine cases (no
-// JSON, malformed JSON, unknown verdict string) all return false, so the chain
-// in Scan falls through to the next backend rather than stopping on a backend
-// that did not actually produce a usable verdict.
+// real JSON object that produced a usable result. Two shapes are accepted:
+//
+//   - Tier 2 (preferred, discussion #56): a "checks" array of booleans. The
+//     verdict, per-finding severities, confidence and summary are all DERIVED in
+//     Go from which checks fired (deriveVerdict), so two runs answering the same
+//     booleans yield byte-identical results and the OK/SUSPICIOUS boundary is
+//     deterministic rather than a sampled label.
+//   - Legacy: a top-level "verdict" string with model-assigned findings. Still
+//     accepted so a model that ignores the checklist instructions keeps working,
+//     just without the Tier-2 reproducibility guarantee.
+//
+// The non-genuine cases (no JSON, malformed JSON, neither a checks array nor a
+// known verdict string) return false so the chain in Scan falls through to the
+// next backend rather than stopping on a backend that produced no usable result.
 func parseVerdictResult(raw string) (Verdict, bool) {
 	blob := jsonBlobRe.FindString(raw)
 	if blob == "" {
@@ -202,17 +216,47 @@ func parseVerdictResult(raw string) (Verdict, bool) {
 		return failClosed("Scanner returned no parseable result"), false
 	}
 	dbgBlock("parseVerdict: extracted JSON blob", blob)
-	var v Verdict
-	if err := json.Unmarshal([]byte(blob), &v); err != nil {
+	// Checks is a pointer so we can tell an empty checklist ({"checks":[]},
+	// a genuine clean OK) from an absent one (legacy shape or no result).
+	var parsed struct {
+		Verdict    string    `json:"verdict"`
+		Confidence float64   `json:"confidence"`
+		Summary    string    `json:"summary"`
+		Findings   []Finding `json:"findings"`
+		Checks     *[]Check  `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(blob), &parsed); err != nil {
 		dbg("parseVerdict: json.Unmarshal failed: %v (issue #17)", err)
 		return failClosed("Scanner returned malformed JSON"), false
 	}
-	if _, ok := Rank[v.Verdict]; !ok {
-		dbg("parseVerdict: unknown verdict %q, downgrading to SUSPICIOUS", v.Verdict)
-		v.Verdict = "SUSPICIOUS"
-		return v, false // contract violation: treat as a non-genuine result
+
+	// Tier 2: a checklist is authoritative. Derive everything deterministically
+	// and ignore any model-supplied verdict/confidence/summary/findings.
+	if parsed.Checks != nil {
+		checks := *parsed.Checks
+		verdict, findings, confidence, summary := deriveVerdict(checks)
+		dbg("parseVerdict: derived %s from %d checks (confidence %.0f)", verdict, len(checks), confidence)
+		return Verdict{
+			Verdict:    verdict,
+			Confidence: confidence,
+			Summary:    summary,
+			Findings:   findings,
+			Checks:     checks,
+		}, true
 	}
-	return v, true
+
+	// Legacy shape: trust the model's own verdict string.
+	if _, ok := Rank[parsed.Verdict]; !ok {
+		dbg("parseVerdict: no checks and unknown verdict %q, downgrading to SUSPICIOUS", parsed.Verdict)
+		return Verdict{Verdict: "SUSPICIOUS", Confidence: parsed.Confidence, Summary: parsed.Summary}, false
+	}
+	dbg("parseVerdict: legacy verdict %q (no checklist)", parsed.Verdict)
+	return Verdict{
+		Verdict:    parsed.Verdict,
+		Confidence: parsed.Confidence,
+		Summary:    parsed.Summary,
+		Findings:   parsed.Findings,
+	}, true
 }
 
 // parseVerdict is a thin wrapper kept for callers that only need the verdict.

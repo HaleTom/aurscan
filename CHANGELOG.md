@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be made reproducible, is documented as such — prefer the `api` backend
   or a seeded local `openai` model when reproducibility matters.
 
+### Changed
+- **Deterministic verdict from a fixed checklist (discussion #56, Tier 2).** The
+  model no longer emits the verdict, confidence or per-finding severity. It
+  answers a fixed catalog of concrete yes/no checks (`pipe_to_shell`,
+  `unrelated_pkg_manager_exec`, `credential_access`, `writes_outside_build`,
+  `unverifiable_provenance`, …) and cites evidence; aurscan derives the verdict
+  in code — any critical check → MALICIOUS, else any warning → SUSPICIOUS, else
+  OK — with severities from a fixed table and a deterministic confidence and
+  summary. Two runs answering the same checks yield a byte-identical result, so
+  the OK/SUSPICIOUS boundary no longer flips on borderline packages. Unrecognised
+  check ids are recorded as info and cannot escalate or de-escalate the verdict;
+  the `other_critical`/`other_warning` catch-alls are the sanctioned escape
+  hatch. Models that emit the previous `verdict`/`findings` shape are still
+  accepted (without the reproducibility guarantee). The verdict-cache version was
+  bumped to `v2`, so pre-existing cached verdicts are re-scanned under the new
+  policy rather than replayed.
+
 ## [0.7.1] - 2026-07-04
 
 ### Added

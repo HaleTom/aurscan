@@ -32,7 +32,9 @@ import (
 
 // cacheVersion is bumped when the stored schema or keying scheme changes, so an
 // upgraded aurscan ignores entries written by an incompatible older one.
-const cacheVersion = "v1"
+// v2: Tier-2 checklist verdict derivation (discussion #56). The prompt and the
+// verdict policy changed, so v1 entries must not be replayed under v2 rules.
+const cacheVersion = "v2"
 
 // defaultCacheTTL bounds how long a stored verdict is served. The key already
 // captures package/prompt/instructions/model, so a shorter-lived opinion is not
