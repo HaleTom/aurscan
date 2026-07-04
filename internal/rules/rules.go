@@ -127,6 +127,81 @@ var catalog = []Rule{
 // VCS sources legitimately use SKIP; avoid flagging CHK-005 for them.
 var vcsLine = regexp.MustCompile(`(?i)^\s*source=.*\b(git|svn|hg|bzr)\+`)
 
+// --- BLD-001 / BLD-002: build-cache confinement (issue #55) -----------------
+//
+// A `go` or `cargo` invocation whose caches are not confined to $srcdir writes
+// outside the build directory into the invoking user's $HOME: the Go module
+// cache lands in ~/go/pkg/mod (with read-only permissions unless -modcacherw)
+// and cargo's registry/git caches land in ~/.cargo. That is failure by
+// omission, not malice — but a scanner that promises "nothing ran yet" should
+// tell the user their $HOME will be written to. Cannot be a catalog regex:
+// the rule is conditional (build command present AND confinement absent), so
+// it is handled specially in Scan like SRC-001.
+//
+// A command counts as cache-writing when the subcommand touches the module /
+// registry / build caches; `go version`, `go env`, `cargo --version` etc. do
+// not fire. Env-prefix assignments before the command name are permitted
+// (`GOPATH="$srcdir" go build` — the prefix itself is the confinement, caught
+// by the assignment scan on the raw text). The `(?:^|\|\s*)` anchor matches
+// the head of each pipeline segment in the deobfuscated command view.
+var (
+	goWriteCmd = regexp.MustCompile(
+		`(?:^|\|\s*)(?:[A-Za-z_][A-Za-z0-9_]*=[^\s|]*\s+)*go\s+(?:build|install|get|run|test|generate|mod|tool|download|vet)\b`)
+	cargoWriteCmd = regexp.MustCompile(
+		`(?:^|\|\s*)(?:[A-Za-z_][A-Za-z0-9_]*=[^\s|]*\s+)*cargo\s+(?:build|install|fetch|test|check|update|vendor|run|rustc|doc|bench|clippy|add)\b`)
+	// Raw-text fallbacks (shell parse failed): anchored after a command
+	// separator so "cargo build" cannot fire the go rule and vice versa.
+	goWriteRaw = regexp.MustCompile(
+		`(?m)(?:^|[;&|({]|\bthen\b|\bdo\b)[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*go[ \t]+(?:build|install|get|run|test|generate|mod|tool|download|vet)\b`)
+	cargoWriteRaw = regexp.MustCompile(
+		`(?m)(?:^|[;&|({]|\bthen\b|\bdo\b)[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*cargo[ \t]+(?:build|install|fetch|test|check|update|vendor|run|rustc|doc|bench|clippy|add)\b`)
+	// Confinement: a live (non-comment) assignment/export of the confining
+	// variable anywhere in the file counts — PKGBUILD functions run in the
+	// same makepkg process, so an export in prepare() covers build(). For Go,
+	// a vendored build (-mod=vendor) does not touch the module cache and
+	// counts too. Inline prefix assignments (`GOPATH=… go build`) match here
+	// as well since they appear verbatim in the raw text.
+	goConfined    = regexp.MustCompile(`\b(?:GOPATH|GOMODCACHE)=|-mod=vendor\b`)
+	cargoConfined = regexp.MustCompile(`\bCARGO_HOME=`)
+)
+
+// checkCacheConfinement raises BLD-001/BLD-002 when a PKGBUILD runs a
+// cache-writing go/cargo command without confining GOPATH/GOMODCACHE or
+// CARGO_HOME (issue #55). Informational: it feeds the LLM as context and
+// tells the user the build will write into their $HOME.
+func checkCacheConfinement(name, text string, cmds []cmdLine, parsed bool,
+	add func(code, rname string, sev Severity, file, snippet string)) {
+	type check struct {
+		code, rname string
+		cmdRe, raw  *regexp.Regexp
+		confined    *regexp.Regexp
+	}
+	for _, c := range []check{
+		{"BLD-001", "go build without confined GOPATH/GOMODCACHE (writes to ~/go)",
+			goWriteCmd, goWriteRaw, goConfined},
+		{"BLD-002", "cargo without confined CARGO_HOME (writes to ~/.cargo)",
+			cargoWriteCmd, cargoWriteRaw, cargoConfined},
+	} {
+		if firstLiveMatch(text, c.confined, true) >= 0 {
+			continue // caches are confined (or vendored); nothing to report
+		}
+		if parsed {
+			// Command-position-aware view: `echo "go build …"` is data and
+			// does not fire; split-token tricks are already reassembled.
+			for _, cl := range cmds {
+				if c.cmdRe.MatchString(cl.text) {
+					add(c.code, c.rname, Medium, name, cl.text)
+					break
+				}
+			}
+			continue
+		}
+		if idx := firstLiveMatch(text, c.raw, true); idx >= 0 {
+			add(c.code, c.rname, Medium, name, lineAround(text, idx))
+		}
+	}
+}
+
 // commentLine matches a full-line shell/INI/desktop comment. Only whole-line
 // comments are stripped: inline "# ..." is NOT treated as a comment because a
 // PKGBUILD URL fragment (e.g. "...nomacs.git#tag=${pkgver}") legitimately
@@ -302,6 +377,9 @@ func Scan(files map[string]string) []Hit {
 		// SRC-001: flag VCS sources on hosts that are NOT well-known forges or
 		// official distribution / upstream Git hosts. Only on PKGBUILD.
 		if isPKGBUILD {
+			// BLD-001/BLD-002: go/cargo caches not confined to $srcdir
+			// (issue #55).
+			checkCacheConfinement(name, text, cmds, parsed, add)
 			for _, m := range gitSourceHost.FindAllStringSubmatchIndex(text, -1) {
 				start, host := m[0], text[m[2]:m[3]]
 				if isCommentAt(text, start) || isReputableGitHost(host) {
