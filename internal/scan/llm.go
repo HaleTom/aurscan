@@ -20,10 +20,12 @@ const (
 	defaultTimeout = 180 * time.Second
 	maxOutTokens   = 2000
 
-	// defaultTemperature is conservative for deterministic auditing. Reasoning
-	// models (e.g. Gemma) usually need 1.0 — set it per backend in llmN.conf
-	// (temperature=) or via AURSCAN_OPENAI_TEMPERATURE.
-	defaultTemperature = 0.1
+	// defaultTemperature is 0 (greedy decoding) for reproducible auditing: the
+	// same package should yield the same verdict run-to-run (discussion #56).
+	// Reasoning models (e.g. Gemma) that misbehave at 0 can be raised per
+	// backend in llmN.conf (temperature=) or via AURSCAN_TEMPERATURE /
+	// AURSCAN_OPENAI_TEMPERATURE.
+	defaultTemperature = 0.0
 )
 
 // llmTimeout is the per-request deadline. It defaults to defaultTimeout but can
@@ -97,6 +99,29 @@ func nz(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// ModelID returns the effective model id this backend will request, resolving
+// the same per-kind env fallbacks the callX functions use. It is used to record
+// which model produced a verdict and to key the verdict cache (discussion #56),
+// so that switching models re-scans rather than serving a stale opinion. The
+// Codex and Claude Code CLIs may leave this empty when no model is pinned; the
+// key is still stable, just less specific.
+func (b Backend) ModelID() string {
+	switch b.Kind {
+	case "api":
+		return nz(b.Model, DefaultModel())
+	case "openai":
+		return nz(b.Model, os.Getenv("AURSCAN_OPENAI_MODEL"))
+	case "codex":
+		return nz(b.Model, os.Getenv("AURSCAN_CODEX_MODEL"))
+	case "claude":
+		return nz(b.Model, os.Getenv("AURSCAN_MODEL"))
+	case "cmd":
+		return b.Cmd
+	default:
+		return b.Model
+	}
 }
 
 // backendLabel is the short name used in the "trying next" warning. Distinct
@@ -398,6 +423,12 @@ func callCodexCLI(ctx context.Context, be Backend, instructions, content string,
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+	// NOTE (discussion #56): `codex exec` exposes no temperature/seed knob and
+	// drives a reasoning model, so this backend cannot be made reproducible the
+	// way the api/openai backends can. Pin --model for at least model stability;
+	// for reproducible verdicts prefer the api backend (temperature 0) or a
+	// local openai model with a fixed seed. The verdict cache still gives
+	// same-input/same-output on re-runs regardless of backend.
 	args = append(args, instructions)
 
 	c := exec.CommandContext(ctx, "codex", args...)
@@ -423,10 +454,11 @@ func callAPI(ctx context.Context, be Backend, instructions, content string) (str
 		maxTok = be.MaxTokens
 	}
 	body, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": maxTok,
-		"system":     instructions,
-		"messages":   []map[string]string{{"role": "user", "content": content}},
+		"model":       model,
+		"max_tokens":  maxTok,
+		"temperature": resolveTemperature(be), // 0 by default — reproducible auditing (#56)
+		"system":      instructions,
+		"messages":    []map[string]string{{"role": "user", "content": content}},
 	})
 	dbgBlock("anthropic API request body", string(body))
 	req, _ := http.NewRequestWithContext(ctx, "POST", nz(be.URL, apiURL), bytes.NewReader(body))
@@ -465,18 +497,22 @@ func callAPI(ctx context.Context, be Backend, instructions, content string) (str
 	return sb.String(), u, nil
 }
 
-// resolveTemperature picks the openai sampling temperature: an explicit
-// per-backend value (llmN.conf temperature=) wins, then AURSCAN_OPENAI_TEMPERATURE,
-// then defaultTemperature. Reasoning models such as Gemma generally need 1.0.
+// resolveTemperature picks the sampling temperature for auditing, lowest wins:
+// an explicit per-backend value (llmN.conf temperature=), then the backend-
+// agnostic AURSCAN_TEMPERATURE, then the openai-specific AURSCAN_OPENAI_TEMPERATURE
+// (kept for compatibility), then defaultTemperature (0). Reasoning models such
+// as Gemma may need 1.0; raise it there.
 func resolveTemperature(be Backend) float64 {
 	if be.Temperature != nil {
 		return *be.Temperature
 	}
-	if v := os.Getenv("AURSCAN_OPENAI_TEMPERATURE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
+	for _, key := range []string{"AURSCAN_TEMPERATURE", "AURSCAN_OPENAI_TEMPERATURE"} {
+		if v := os.Getenv(key); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				return f
+			}
+			dbg("ignoring invalid %s=%q", key, v)
 		}
-		dbg("ignoring invalid AURSCAN_OPENAI_TEMPERATURE=%q", v)
 	}
 	return defaultTemperature
 }

@@ -50,6 +50,15 @@ type Result struct {
 	// so the unattended build-hook path treats a fallback-produced OK as needing
 	// confirmation rather than an automatic pass.
 	Fallback bool
+	// Model is the resolved model id that produced this verdict (discussion #56),
+	// recorded so runs are comparable across time and machines and so a cross-
+	// backend difference is explainable rather than mysterious. May be empty for
+	// CLI backends that do not expose/pin a model.
+	Model string
+	// Cached is true when the verdict was replayed from the verdict cache rather
+	// than freshly produced by a backend. A cached result cost nothing this run,
+	// so its Usage is zero.
+	Cached bool
 }
 
 func failClosed(why string) Verdict {
@@ -88,6 +97,18 @@ func Scan(pkg string, files Files, sig Signals) Result {
 	}
 	dbg("scan %s: chain (%d backends): %v", pkg, len(chain), chain) // safe: Backend.String() redacts api_key
 
+	// Verdict cache (discussion #56): key on the primary backend's model plus
+	// the exact instructions+prompt, so an identical re-scan replays the stored
+	// verdict instead of re-sampling the model. --refresh (CacheBypass) skips
+	// the read but still refreshes the entry below.
+	primaryModel := chain[0].ModelID()
+	key := cacheKey(instr, prompt, primaryModel)
+	if !CacheBypass {
+		if v, model, ok := cacheLoad(key); ok {
+			return Result{Pkg: pkg, V: v, Model: model, Cached: true}
+		}
+	}
+
 	// last holds the most recent attempt's fail-closed verdict, returned if the
 	// whole chain is exhausted. For a single-backend chain this reproduces the
 	// previous behaviour exactly (same verdict, summary and Failed flag).
@@ -112,7 +133,14 @@ func Scan(pkg string, files Files, sig Signals) Result {
 			last = Result{Pkg: pkg, V: v, Usage: u, Failed: true}
 			continue
 		}
-		return finishResult(pkg, v, u, i > 0, be)
+		res := finishResult(pkg, v, u, i > 0, be)
+		res.Model = be.ModelID()
+		// Only cache a genuine PRIMARY verdict. A fallback verdict is a degraded
+		// scan and must not be replayed as if the primary scanner had run.
+		if i == 0 {
+			cacheStore(key, res.Model, v)
+		}
+		return res
 	}
 	return last
 }

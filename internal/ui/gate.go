@@ -42,8 +42,11 @@ func VerdictBadge(verdict string) string {
 
 func printVerdict(r scan.Result) {
 	badge := VerdictBadge(r.V.Verdict)
-	fmt.Printf("[%s] %s  %s\n", badge, Bold(r.Pkg),
-		Dim(fmt.Sprintf("confidence %.0f%%", r.V.Confidence)))
+	meta := fmt.Sprintf("confidence %.0f%%", r.V.Confidence)
+	if r.Cached {
+		meta += ", cached"
+	}
+	fmt.Printf("[%s] %s  %s\n", badge, Bold(r.Pkg), Dim(meta))
 	w := TerminalWidth()
 	if r.V.Summary != "" {
 		fmt.Printf("  %s\n", WrapLine(r.V.Summary, w-len(IndentBody), IndentBody))

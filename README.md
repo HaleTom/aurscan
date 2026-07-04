@@ -52,6 +52,7 @@ Two stages do the work. Fast, offline **static rules** catch the known campaign 
 - [Configuration](#configuration)
 - [Cost and tokens](#cost-and-tokens)
 - [Customising detection](#customising-detection)
+- [Reproducibility](#reproducibility)
 - [Safety model](#safety-model)
 - [Limitations](#limitations)
 - [Project layout](#project-layout)
@@ -342,11 +343,15 @@ aurscan --debug --score ./PKGBUILD
 | `AURSCAN_OPENAI_URL` / `_FALLBACK` | — | OpenAI-compatible endpoint(s) for a local model |
 | `AURSCAN_OPENAI_MODEL` | omitted | when unset, no `model` field is sent, so a routing proxy (LiteLLM, etc.) can pick the model; set it to pin a specific model on servers that require one |
 | `AURSCAN_OPENAI_API_KEY` | `OPENAI_API_KEY` | bearer token for the endpoint (e.g. LiteLLM); omit for open servers |
-| `AURSCAN_OPENAI_TEMPERATURE` | `0.1` | sampling temperature; set `1.0` for reasoning models like Gemma |
+| `AURSCAN_OPENAI_TEMPERATURE` | `0` | sampling temperature; set `1.0` for reasoning models like Gemma |
 | `AURSCAN_OPENAI_MAX_TOKENS` | `2000` | output-token budget; raise for reasoning models (empty reply with `finish_reason=length`) |
+| `AURSCAN_TEMPERATURE` | `0` | backend-agnostic sampling temperature (applies to the `api` backend too); `0` = reproducible auditing |
 | `AURSCAN_TIMEOUT` | `180` | per-request budget in **seconds**; raise it for slow CPU-only models |
 | `AURSCAN_INSTRUCTIONS` | — | path to extra auditor instructions (appended) |
 | `AURSCAN_RULES_ONLY` | — | `1` = static rules only, never call a model |
+| `AURSCAN_NO_CACHE` | — | `1` = disable the verdict cache (no read, no write) |
+| `AURSCAN_CACHE_DIR` | `$XDG_CACHE_HOME/aurscan/verdicts` | verdict-cache location |
+| `AURSCAN_CACHE_TTL` | `30` | verdict-cache lifetime in **days**; `0` = never expire |
 | `NO_COLOR` | — | disable coloured output |
 
 ## Cost and tokens
@@ -381,6 +386,15 @@ aurscan --rules-only <pkgname|./dir>     # or set AURSCAN_RULES_ONLY=1
 ```
 
 **Quote-aware — obfuscation does not slip past.** The command, flag and path rules do not match raw text. The `PKGBUILD` and `.install` scripts are parsed with a real shell parser ([`mvdan.cc/sh`](https://github.com/mvdan/sh), pure-Go, vendored, **never executed**) and the rules run against the *deobfuscated* command view. So split-token tricks like `s"ud"o`, `cu""rl … | sh`, `su$'\x64'o` and `${IFS:0:0}sudo` are caught as the commands they actually run, while a `sudo` printed inside an `echo` instruction is correctly ignored instead of false-flagging. The splicing itself is also reported as **`OBF-004` (critical)** — a PKGBUILD has no honest reason to disguise a command name, so any attempt is treated as a strong signal in its own right, even when the disguised command is otherwise harmless.
+
+**Build-cache hygiene — your `$HOME` should stay yours.** A `go build`/`go install` without a confined `GOPATH`/`GOMODCACHE` writes the module cache to `~/go/pkg/mod` (read-only files, unless `-modcacherw`); a `cargo build`/`cargo fetch` without `CARGO_HOME` writes registry and git caches to `~/.cargo`. Not malicious — failure by omission — but a scanner that promises "nothing ran yet" should tell you the build will write outside `$srcdir`. Reported as **`BLD-001`/`BLD-002` (info)**. Suppressed when the PKGBUILD exports or inline-prefixes the variable (an export in `prepare()` covers `build()` — same makepkg process) or, for Go, builds vendored with `-mod=vendor`. These checks use the same command-position-aware view: an echo'd `go build` does not fire.
+
+## Reproducibility
+
+An LLM is never perfectly deterministic, so the *same* PKGBUILD can otherwise earn different verdicts on repeat runs — a real trust problem when a borderline package sometimes blocks and sometimes passes. aurscan reduces this two ways:
+
+- **Temperature 0 by default** on the `api` and `openai` backends (greedy decoding), which collapses most sampling variance. Raise it per backend (`temperature=` in `llmN.conf`) or via `AURSCAN_TEMPERATURE` / `AURSCAN_OPENAI_TEMPERATURE` for reasoning models like Gemma that need `1.0`. The **Codex CLI cannot** be pinned this way — `codex exec` exposes no temperature or seed and drives a reasoning model — so for reproducible verdicts prefer the `api` backend or a local `openai` model with a fixed seed.
+- **A verdict cache** keyed on a hash of the package files, the full auditor instructions and the resolved model id. An identical re-scan replays the stored verdict without calling the model, so a re-run *cannot* flip. Any change to the package, the prompt, the instructions or the model misses the cache and re-scans; fallback (degraded) and failed scans are never cached. The recorded model id is shown so a cross-backend difference is explainable rather than mysterious. Force a fresh opinion with `--refresh` (re-scans and updates the entry) or disable the cache entirely with `--no-cache` / `AURSCAN_NO_CACHE=1`.
 
 ## Safety model
 

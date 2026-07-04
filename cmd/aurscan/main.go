@@ -43,6 +43,8 @@ const usage = `usage:
   aurscan --uninstall-paru-hook    remove aurscan hook from paru.conf
   aurscan --uninstall-yay-hook     remove aurscan hook from yay init.lua
   aurscan --debug ...              trace LLM request/response to stderr
+  aurscan --refresh ...            ignore any cached verdict; re-scan and re-store
+  aurscan --no-cache ...           disable the verdict cache for this run
   aurscan --version                print version and exit
   syay <yay args...>               transparent yay wrapper (symlink)
   sparu <paru args...>             transparent paru wrapper (symlink)`
@@ -284,15 +286,23 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// stripDebug removes --debug from anywhere in args and enables scan tracing.
+// stripDebug removes --debug/--refresh/--no-cache from anywhere in args and
+// applies their effects. --refresh forces a fresh model verdict (skips the
+// cache read but still updates the stored entry); --no-cache disables the
+// verdict cache entirely for this run (discussion #56).
 func stripDebug(args []string) []string {
 	out := args[:0:0]
 	for _, a := range args {
-		if a == "--debug" {
+		switch a {
+		case "--debug":
 			scan.Debug = true
-			continue
+		case "--refresh", "--no-cache-read":
+			scan.CacheBypass = true
+		case "--no-cache":
+			os.Setenv("AURSCAN_NO_CACHE", "1")
+		default:
+			out = append(out, a)
 		}
-		out = append(out, a)
 	}
 	return out
 }

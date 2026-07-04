@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Verdict reproducibility (discussion #56).** An identical re-scan no longer
+  risks flipping the verdict. Two changes: sampling **temperature now defaults to
+  0** (greedy) on the `api` and `openai` backends — the `api` path previously
+  sent no temperature at all and ran at the provider default of 1.0 — with a
+  backend-agnostic `AURSCAN_TEMPERATURE` override (and the existing
+  `AURSCAN_OPENAI_TEMPERATURE`) for reasoning models that need `1.0`; and a
+  **content-hash verdict cache** keyed on the package files, full instructions
+  and resolved model id, so an identical input replays the stored verdict
+  without calling the model. `--refresh` forces a fresh scan, `--no-cache` /
+  `AURSCAN_NO_CACHE=1` disables it, `AURSCAN_CACHE_DIR` / `AURSCAN_CACHE_TTL`
+  tune it. Fallback and failed scans are never cached; all cache I/O is
+  best-effort and can never make a scan fail.
+- **Model pinning in results.** Each result records the resolved model id that
+  produced the verdict, shown in output so a cross-backend or cross-machine
+  difference is explainable. The Codex CLI, which exposes no temperature/seed and
+  cannot be made reproducible, is documented as such — prefer the `api` backend
+  or a seeded local `openai` model when reproducibility matters.
+
 ## [0.7.1] - 2026-07-04
 
 ### Added
