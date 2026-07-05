@@ -2,8 +2,10 @@ package ui
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -84,28 +86,57 @@ func FindingPrefixLen(sev, file string) int {
 	return 7 + len(sev) + len(file)
 }
 
+// ansiRe matches ANSI/VT100 escape sequences so they can be stripped from
+// input before wrapping: their bytes would otherwise consume visible-width
+// budget without producing any visible output. LLM-generated findings should
+// never contain these, but a leaked color code or a model that echoes terminal
+// escapes would corrupt the width arithmetic.
+//
+// Source: github.com/acarl005/stripansi (MIT License) — the canonical
+// community regex for stripping ANSI codes. Covers CSI (\x1b[ and the
+// single-byte \x9b form), OSC (terminated by BEL or ST), and the full range
+// of intermediate and final bytes, so it handles 256-color, cursor moves,
+// title-setting, and other non-color escapes that a narrower color-only
+// regex would miss. Kept verbatim rather than vendoring the package to
+// avoid adding a dependency for a single regexp.
+var ansiRe = regexp.MustCompile(`[\x1b\x9b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\x07)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PRZcf-ntqry=><~]))`)
+
+// normalizeWrapInput strips ANSI escapes and collapses any run of whitespace
+// (spaces, tabs, newlines) into a single space. LLM output may contain
+// irregular whitespace (multi-space runs from a model, a literal newline
+// inside what should be one sentence, tabs used as separators) which would
+// otherwise produce trailing spaces, ragged lines, or orphan words after
+// wrapping. strings.Fields already trims leading/trailing whitespace.
+func normalizeWrapInput(s string) string {
+	s = ansiRe.ReplaceAllString(s, "")
+	return strings.Join(strings.Fields(s), " ")
+}
+
 func WrapLine(s string, width int, indent string) string {
+	s = normalizeWrapInput(s)
+	if s == "" {
+		return ""
+	}
 	if width <= 0 {
 		width = minWrapWidth
 	}
 	var b strings.Builder
 	for {
-		s = strings.TrimLeft(s, " ")
-		if s == "" {
-			break
-		}
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 			b.WriteString(indent)
 		}
-		if len(s) <= width {
+		// Rune-aware length: a multi-byte UTF-8 rune (e.g. an em dash, 3 bytes)
+		// occupies one visible column, not three. Measuring by bytes under-fills
+		// lines that contain non-ASCII punctuation.
+		if utf8.RuneCountInString(s) <= width {
 			b.WriteString(s)
 			break
 		}
-		// Byte-level ops: len() and LastIndexByte work on bytes, not runes.
-		// This is correct for the AUR domain (ASCII English text only).
-		// The guard above ensures width+1 <= len(s), so the slice is safe.
-		cut := strings.LastIndexByte(s[:width+1], ' ')
+		// Find the last space within the width budget (by rune offset). The
+		// input is already whitespace-normalized, so every space is a single
+		// byte and a single rune; byte indexing is safe here.
+		cut := lastSpaceBefore(s, width)
 		if cut < 1 {
 			sp := strings.IndexByte(s, ' ')
 			if sp < 0 {
@@ -118,6 +149,29 @@ func WrapLine(s string, width int, indent string) string {
 		}
 		b.WriteString(s[:cut])
 		s = s[cut+1:]
+		if s == "" {
+			break
+		}
 	}
 	return b.String()
+}
+
+// lastSpaceBefore returns the byte offset of the last space in s that falls
+// at or before the width-th rune, or -1 if there is none. It iterates runes
+// without allocating a rune slice: the input is whitespace-normalized (single
+// spaces only), so every space is one byte and one rune.
+func lastSpaceBefore(s string, width int) int {
+	var runeIdx, lastSpaceByte int
+	for byteIdx := 0; byteIdx < len(s); {
+		r, size := utf8.DecodeRuneInString(s[byteIdx:])
+		if runeIdx > width {
+			break
+		}
+		if r == ' ' {
+			lastSpaceByte = byteIdx
+		}
+		byteIdx += size
+		runeIdx++
+	}
+	return lastSpaceByte
 }
