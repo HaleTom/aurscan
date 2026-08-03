@@ -349,6 +349,7 @@ aurscan --debug --score ./PKGBUILD
 | `AURSCAN_TIMEOUT` | `180` | per-request budget in **seconds**; raise it for slow CPU-only models |
 | `AURSCAN_INSTRUCTIONS` | — | path to extra auditor instructions (appended) |
 | `AURSCAN_RULES_ONLY` | — | `1` = static rules only, never call a model |
+| `AURSCAN_DISABLE` | — | `1` = skip scanning entirely; every package gets an instant OK verdict, so builds pass through untouched (re-runs, hash-only changes, or full user control) |
 | `AURSCAN_NO_CACHE` | — | `1` = disable the verdict cache (no read, no write) |
 | `AURSCAN_CACHE_DIR` | `$XDG_CACHE_HOME/aurscan/verdicts` | verdict-cache location |
 | `AURSCAN_CACHE_TTL` | `30` | verdict-cache lifetime in **days**; `0` = never expire |
