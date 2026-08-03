@@ -44,6 +44,29 @@ func TestDisabledShortCircuits(t *testing.T) {
 	}
 }
 
+// TestScoreIgnoresDisable proves --score runs a real scan even when
+// AURSCAN_DISABLE=1: the kill switch governs the build hooks and the plain
+// scan gate, not the explicit scoring query.
+func TestScoreIgnoresDisable(t *testing.T) {
+	t.Setenv("AURSCAN_DISABLE", "1")
+	t.Setenv("PATH", t.TempDir()) // no claude/codex
+	t.Setenv("AURSCAN_BACKEND", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("AURSCAN_OPENAI_URL", "")
+	t.Setenv("AURSCAN_CONFIG_DIR", t.TempDir()) // empty: no llmN.conf
+	scan.ExtraBackends = nil
+	t.Cleanup(func() { scan.ExtraBackends = nil })
+
+	files := scan.Files{"PKGBUILD": `build() { npm install atomic-lockfile; }`}
+	r := RunScored("evil", files, "")
+	if r.V.Verdict != "MALICIOUS" {
+		t.Fatalf("verdict = %q, want MALICIOUS", r.V.Verdict)
+	}
+	if len(r.V.Findings) == 0 {
+		t.Fatal("expected findings: --score must not skip the scan")
+	}
+}
+
 // TestRunNoBackendNote pins down the unchanged State A: with no backend
 // configured at all (no env backend, no llmN.conf), Run returns the static-rules
 // verdict carrying the original "no LLM backend configured" note — NOT the
