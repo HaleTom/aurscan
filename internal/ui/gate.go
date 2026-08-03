@@ -35,6 +35,8 @@ func VerdictBadge(verdict string) string {
 		return Yellow(" SUSP ")
 	case "MALICIOUS":
 		return Red(" MAL! ")
+	case "SKIPPED":
+		return Dim("SKIPPED")
 	default:
 		return verdict
 	}
@@ -66,13 +68,34 @@ func printVerdict(r scan.Result) {
 	}
 }
 
+// allSkipped reports whether every result is SKIPPED (AURSCAN_DISABLE=1).
+func allSkipped(results []scan.Result) bool {
+	skipped := false
+	for _, r := range results {
+		if r.V.Verdict != "SKIPPED" {
+			return false
+		}
+		skipped = true
+	}
+	return skipped
+}
+
+// cleanLine is the message printed when the gate lets a build through.
+func cleanLine(results []scan.Result) string {
+	if allSkipped(results) {
+		return Dim("Scanning disabled — all packages skipped.")
+	}
+	return Green("All scanned packages look clean.") +
+		Dim("  (heuristic scan — not a guarantee)")
+}
+
 // autoPass reports whether results may proceed without any prompt. A non-OK
 // verdict never auto-passes. In strict mode (the unattended build-hook path) a
 // fallback-produced OK does not auto-pass either: the primary scanner was
 // unavailable, so a degraded clean verdict still requires confirmation.
 func autoPass(results []scan.Result, strict bool) bool {
 	for _, r := range results {
-		if r.V.Verdict != "OK" {
+		if r.V.Verdict != "OK" && r.V.Verdict != "SKIPPED" {
 			return false
 		}
 		if strict && r.Fallback {
@@ -87,7 +110,7 @@ func autoPass(results []scan.Result, strict bool) bool {
 func flaggedSet(results []scan.Result, strict bool) []scan.Result {
 	var out []scan.Result
 	for _, r := range results {
-		if r.V.Verdict != "OK" || (strict && r.Fallback) {
+		if (r.V.Verdict != "OK" && r.V.Verdict != "SKIPPED") || (strict && r.Fallback) {
 			out = append(out, r)
 		}
 	}
@@ -159,8 +182,7 @@ func Decide(results []scan.Result, strict bool) bool {
 	summarize(results)
 	w := TerminalWidth()
 	if autoPass(results, strict) {
-		fmt.Println(Green("All scanned packages look clean.") +
-			Dim("  (heuristic scan — not a guarantee)"))
+		fmt.Println(cleanLine(results))
 		return true
 	}
 	fmt.Printf("%s%s\n", Red(Bold("!! aurscan blocked this build: ")),
@@ -221,8 +243,7 @@ func Gate(results []scan.Result, strict bool) bool {
 
 	w := TerminalWidth()
 	if autoPass(results, strict) {
-		fmt.Println(Green("All scanned packages look clean.") +
-			Dim("  (heuristic scan — not a guarantee)"))
+		fmt.Println(cleanLine(results))
 		return true
 	}
 
