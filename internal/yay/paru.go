@@ -208,7 +208,7 @@ func PrebuildHook(args []string) {
 	res := pipeline.Run(name, files, "")
 	results := []scan.Result{res}
 
-	if res.V.Verdict == "OK" && !res.Fallback {
+	if (res.V.Verdict == "OK" || res.V.Verdict == "SKIPPED") && !res.Fallback {
 		ui.Decide(results, true) // prints the clean line
 		os.Exit(0)
 	}
