@@ -348,7 +348,7 @@ func scoreMode(rest []string) int {
 		fmt.Fprintln(os.Stderr, ui.Red("error: ")+err.Error())
 		return 255
 	}
-	res := pipeline.Run(name, files, "")
+	res := pipeline.RunScored(name, files, "")
 	// Show the verdict + findings on stderr (does not pollute the score stdout).
 	printResultStderr(res)
 	if res.Failed {
