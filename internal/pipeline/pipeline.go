@@ -22,7 +22,7 @@ func Run(pkg string, files scan.Files, rep string) scan.Result {
 	// build, when only source-hash changes are expected, or for user control.
 	if Disabled() {
 		return scan.Result{Pkg: pkg, V: scan.Verdict{
-			Verdict:    "OK",
+			Verdict:    "SKIPPED",
 			Confidence: 100,
 			Summary:    "scanning disabled (AURSCAN_DISABLE=1)",
 		}}
@@ -51,7 +51,7 @@ func Run(pkg string, files scan.Files, rep string) scan.Result {
 func AllowRulesOnly() bool { return os.Getenv("AURSCAN_RULES_ONLY") == "1" }
 
 // Disabled reports whether scanning has been switched off entirely
-// (AURSCAN_DISABLE=1). Every package then gets an immediate OK verdict, so
+// (AURSCAN_DISABLE=1). Every package then gets an immediate SKIPPED verdict, so
 // builds pass through untouched: no rules, no model call, no cost.
 func Disabled() bool { return os.Getenv("AURSCAN_DISABLE") == "1" }
 
