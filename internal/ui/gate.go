@@ -7,11 +7,17 @@ import (
 	"os"
 	"strings"
 
+	"github.com/manticore-projects/aurscan/internal/pipeline"
 	"github.com/manticore-projects/aurscan/internal/scan"
 )
 
-// Progress prints the "scanning ..." line before a model call.
+// Progress prints the "scanning ..." line before a model call. It is silent
+// while scanning is disabled (AURSCAN_DISABLE=1): nothing is scanned, so
+// nothing is announced.
 func Progress(pkg string, nfiles int) {
+	if pipeline.Disabled() {
+		return
+	}
 	fmt.Println(Dim(fmt.Sprintf("  scanning %s (%d files) ...", pkg, nfiles)))
 }
 
