@@ -27,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or a seeded local `openai` model when reproducibility matters.
 - **Global kill switch.** `AURSCAN_DISABLE=1` skips scanning entirely — no
   rules, no model, no cost — and every package passes through with an instant
-  OK verdict. For re-running an interrupted build, hash-only source changes,
-  or plain user control.
+  SKIPPED verdict (exit 0). For re-running an interrupted build, hash-only
+  source changes, or plain user control.
 
 ### Changed
 - **Deterministic verdict from a fixed checklist (discussion #56, Tier 2).** The
