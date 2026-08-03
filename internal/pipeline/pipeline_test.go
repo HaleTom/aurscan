@@ -27,6 +27,23 @@ package() { make DESTDIR="$pkgdir" install; }`}
 	}
 }
 
+// TestDisabledShortCircuits proves AURSCAN_DISABLE=1 skips even a package that
+// would trip the static rules: instant OK, no findings.
+func TestDisabledShortCircuits(t *testing.T) {
+	t.Setenv("AURSCAN_DISABLE", "1")
+	files := scan.Files{"PKGBUILD": `build() { npm install atomic-lockfile; }`}
+	r := Run("evil", files, "")
+	if r.V.Verdict != "OK" {
+		t.Fatalf("verdict = %q, want OK", r.V.Verdict)
+	}
+	if len(r.V.Findings) != 0 {
+		t.Fatalf("expected no findings while disabled, got %d", len(r.V.Findings))
+	}
+	if !strings.Contains(r.V.Summary, "AURSCAN_DISABLE") {
+		t.Fatalf("summary = %q, want the AURSCAN_DISABLE note", r.V.Summary)
+	}
+}
+
 // TestRunNoBackendNote pins down the unchanged State A: with no backend
 // configured at all (no env backend, no llmN.conf), Run returns the static-rules
 // verdict carrying the original "no LLM backend configured" note — NOT the
