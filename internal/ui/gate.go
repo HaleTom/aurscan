@@ -44,6 +44,10 @@ func VerdictBadge(verdict string) string {
 
 func printVerdict(r scan.Result) {
 	badge := VerdictBadge(r.V.Verdict)
+	if r.V.Verdict == "SKIPPED" {
+		fmt.Printf("[%s] %s - %s\n", badge, Bold(r.Pkg), r.V.Summary)
+		return
+	}
 	meta := fmt.Sprintf("confidence %.0f%%", r.V.Confidence)
 	if r.Cached {
 		meta += ", cached"
@@ -201,6 +205,10 @@ func Decide(results []scan.Result, strict bool) bool {
 func GateVia(results []scan.Result, in io.Reader, out io.Writer, strict bool) bool {
 	w := TerminalWidth()
 	for _, r := range results {
+		if r.V.Verdict == "SKIPPED" {
+			fmt.Fprintf(out, "[%s] %s - %s\n", VerdictBadge(r.V.Verdict), r.Pkg, r.V.Summary)
+			continue
+		}
 		fmt.Fprintf(out, "[%s] %s (confidence %.0f%%)\n",
 			VerdictBadge(r.V.Verdict), r.Pkg, r.V.Confidence)
 		if r.V.Summary != "" {
