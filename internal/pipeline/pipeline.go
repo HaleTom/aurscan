@@ -17,6 +17,17 @@ import (
 
 // Run scans one package. rep is optional pre-formatted reputation text.
 func Run(pkg string, files scan.Files, rep string) scan.Result {
+	// Scanning disabled (AURSCAN_DISABLE=1): no rules, no model, no cost —
+	// every package passes through untouched. Useful to re-run an interrupted
+	// build, when only source-hash changes are expected, or for user control.
+	if Disabled() {
+		return scan.Result{Pkg: pkg, V: scan.Verdict{
+			Verdict:    "OK",
+			Confidence: 100,
+			Summary:    "scanning disabled (AURSCAN_DISABLE=1)",
+		}}
+	}
+
 	hits := rules.Scan(files)
 
 	// Forced rules-only mode (AURSCAN_RULES_ONLY=1): skip the model entirely.
@@ -38,6 +49,11 @@ func Run(pkg string, files scan.Files, rep string) scan.Result {
 // (AURSCAN_RULES_ONLY=1) — useful to force the cheap path even when a backend
 // exists, e.g. in tight CI loops.
 func AllowRulesOnly() bool { return os.Getenv("AURSCAN_RULES_ONLY") == "1" }
+
+// Disabled reports whether scanning has been switched off entirely
+// (AURSCAN_DISABLE=1). Every package then gets an immediate OK verdict, so
+// builds pass through untouched: no rules, no model call, no cost.
+func Disabled() bool { return os.Getenv("AURSCAN_DISABLE") == "1" }
 
 // RunRulesOnly scans using only the static catalog (no model call, no cost).
 func RunRulesOnly(pkg string, files scan.Files) scan.Result {
