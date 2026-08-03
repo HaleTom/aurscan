@@ -266,6 +266,10 @@ func scanArgs(args []string) []scan.Result {
 // printResultStderr writes a concise verdict + findings to stderr so it does
 // not pollute the score on stdout in --score mode.
 func printResultStderr(r scan.Result) {
+	if r.V.Verdict == "SKIPPED" {
+		fmt.Fprintf(os.Stderr, "[%s] %s - %s\n", ui.VerdictBadge(r.V.Verdict), r.Pkg, r.V.Summary)
+		return
+	}
 	w := ui.TerminalWidth()
 	fmt.Fprintf(os.Stderr, "[%s] %s (confidence %.0f%%)\n",
 		ui.VerdictBadge(r.V.Verdict), r.Pkg, r.V.Confidence)
