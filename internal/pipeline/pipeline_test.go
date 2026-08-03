@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,6 +43,48 @@ func TestDisabledShortCircuits(t *testing.T) {
 	}
 	if !strings.Contains(r.V.Summary, "AURSCAN_DISABLE") {
 		t.Fatalf("summary = %q, want the AURSCAN_DISABLE note", r.V.Summary)
+	}
+}
+
+// TestDisabledNeverInvokesBackend proves the kill switch really stops all
+// scanning: with AURSCAN_DISABLE=1 the model CLI on PATH is never executed
+// (a fake claude would write a marker); without it, the same setup runs and
+// the marker appears.
+func TestDisabledNeverInvokesBackend(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "backend-was-run")
+	script := "#!/bin/sh\n: > '" + marker + "'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("AURSCAN_BACKEND", "")
+	t.Setenv("AURSCAN_RULES_ONLY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("AURSCAN_OPENAI_URL", "")
+	t.Setenv("AURSCAN_CONFIG_DIR", t.TempDir()) // empty: no llmN.conf
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())     // fresh verdict cache: no stale hits
+	scan.ExtraBackends = nil
+	t.Cleanup(func() { scan.ExtraBackends = nil })
+
+	files := scan.Files{"PKGBUILD": `build() { npm install atomic-lockfile; }`}
+
+	t.Setenv("AURSCAN_DISABLE", "1")
+	r := Run("evil", files, "")
+	if r.V.Verdict != "SKIPPED" {
+		t.Fatalf("verdict = %q, want SKIPPED", r.V.Verdict)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("model backend was invoked while scanning is disabled")
+	}
+
+	t.Setenv("AURSCAN_DISABLE", "")
+	r = Run("evil", files, "")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("sanity: backend marker missing after an enabled run: %v", err)
+	}
+	if !r.Failed {
+		t.Fatalf("sanity: fake backend exits 1, want Failed=true, got verdict %q", r.V.Verdict)
 	}
 }
 
