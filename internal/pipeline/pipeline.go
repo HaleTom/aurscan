@@ -15,12 +15,24 @@ import (
 	"github.com/manticore-projects/aurscan/internal/scan"
 )
 
-// Run scans one package. rep is optional pre-formatted reputation text.
+// Run scans one package, honoring AURSCAN_DISABLE. rep is optional
+// pre-formatted reputation text.
 func Run(pkg string, files scan.Files, rep string) scan.Result {
+	return run(pkg, files, rep, true)
+}
+
+// RunScored scans one package for --score: an explicit scoring query always
+// runs a real scan and ignores AURSCAN_DISABLE — the kill switch governs the
+// yay/paru build hooks and the plain scan gate, not scoring.
+func RunScored(pkg string, files scan.Files, rep string) scan.Result {
+	return run(pkg, files, rep, false)
+}
+
+func run(pkg string, files scan.Files, rep string, honorDisable bool) scan.Result {
 	// Scanning disabled (AURSCAN_DISABLE=1): no rules, no model, no cost —
 	// every package passes through untouched. Useful to re-run an interrupted
 	// build, when only source-hash changes are expected, or for user control.
-	if Disabled() {
+	if honorDisable && Disabled() {
 		return scan.Result{Pkg: pkg, V: scan.Verdict{
 			Verdict:    "SKIPPED",
 			Confidence: 100,
