@@ -238,6 +238,13 @@ func updateCheck() []scan.Result {
 
 func scanArgs(args []string) []scan.Result {
 	var results []scan.Result
+	if pipeline.Disabled() {
+		for _, a := range args {
+			abs, _ := filepath.Abs(a)
+			results = append(results, pipeline.SkippedResult(filepath.Base(abs)))
+		}
+		return results
+	}
 	var names []string
 	for _, a := range args {
 		if fi, err := os.Stat(a); err == nil && fi.IsDir() {

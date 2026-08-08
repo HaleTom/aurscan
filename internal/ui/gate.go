@@ -99,10 +99,10 @@ func cleanLine(results []scan.Result) string {
 		Dim("  (heuristic scan — not a guarantee)")
 }
 
-// autoPass reports whether results may proceed without any prompt. A non-OK
-// verdict never auto-passes. In strict mode (the unattended build-hook path) a
-// fallback-produced OK does not auto-pass either: the primary scanner was
-// unavailable, so a degraded clean verdict still requires confirmation.
+// autoPass reports whether results may proceed without any prompt. Only OK and
+// explicit SKIPPED results auto-pass. In strict mode (the unattended build-hook
+// path) a fallback-produced OK does not auto-pass either: the primary scanner
+// was unavailable, so a degraded clean verdict still requires confirmation.
 func autoPass(results []scan.Result, strict bool) bool {
 	for _, r := range results {
 		if r.V.Verdict != "OK" && r.V.Verdict != "SKIPPED" {
@@ -115,8 +115,8 @@ func autoPass(results []scan.Result, strict bool) bool {
 	return true
 }
 
-// flaggedSet is the set of results that block an auto-pass: every non-OK
-// verdict, plus (in strict mode) any fallback-produced OK.
+// flaggedSet is the set of results that block an auto-pass: every verdict other
+// than OK or explicit SKIPPED, plus (in strict mode) any fallback-produced OK.
 func flaggedSet(results []scan.Result, strict bool) []scan.Result {
 	var out []scan.Result
 	for _, r := range results {
@@ -187,7 +187,8 @@ func summarize(results []scan.Result) string {
 
 // Decide prints verdicts and usage, then returns whether it is safe to proceed
 // WITHOUT any interactive prompt. Used by the paru PreBuildCommand hook, whose
-// stdio may not be a usable TTY: any non-OK verdict blocks (fail-closed).
+// stdio may not be a usable TTY: adverse verdicts block (fail-closed); explicit
+// SKIPPED is the user-requested pass-through exception.
 func Decide(results []scan.Result, strict bool) bool {
 	summarize(results)
 	w := TerminalWidth()
@@ -201,7 +202,7 @@ func Decide(results []scan.Result, strict bool) bool {
 }
 
 // Gate prints every verdict, the accumulated session usage/cost, and — if any
-// package is non-OK — blocks. On a TTY it offers abort / report / override;
+// package has an adverse verdict — blocks. On a TTY it offers abort / report / override;
 // off a TTY (scripts, the editor hook in a non-interactive yay) it always
 // blocks. Returns true only if it is safe/approved to proceed.
 // GateVia is Gate's interactive core operating over an explicit reader/writer

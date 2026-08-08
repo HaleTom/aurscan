@@ -33,11 +33,7 @@ func run(pkg string, files scan.Files, rep string, honorDisable bool) scan.Resul
 	// every package passes through untouched. Useful to re-run an interrupted
 	// build, when only source-hash changes are expected, or for user control.
 	if honorDisable && Disabled() {
-		return scan.Result{Pkg: pkg, V: scan.Verdict{
-			Verdict:    "SKIPPED",
-			Confidence: 100,
-			Summary:    "scanning disabled (AURSCAN_DISABLE=1)",
-		}}
+		return SkippedResult(pkg)
 	}
 
 	hits := rules.Scan(files)
@@ -66,6 +62,15 @@ func AllowRulesOnly() bool { return os.Getenv("AURSCAN_RULES_ONLY") == "1" }
 // (AURSCAN_DISABLE=1). Every package then gets an immediate SKIPPED verdict, so
 // builds pass through untouched: no rules, no model call, no cost.
 func Disabled() bool { return os.Getenv("AURSCAN_DISABLE") == "1" }
+
+// SkippedResult returns the pass-through result for a disabled scan.
+func SkippedResult(pkg string) scan.Result {
+	return scan.Result{Pkg: pkg, V: scan.Verdict{
+		Verdict:    "SKIPPED",
+		Confidence: 100,
+		Summary:    "scanning disabled (AURSCAN_DISABLE=1)",
+	}}
+}
 
 // RunRulesOnly scans using only the static catalog (no model call, no cost).
 func RunRulesOnly(pkg string, files scan.Files) scan.Result {
